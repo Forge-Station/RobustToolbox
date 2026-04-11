@@ -252,6 +252,13 @@ namespace Robust.Shared
             CVarDef.Create("net.force_ack_threshold", 60, CVar.ARCHIVE | CVar.SERVERONLY);
 
         /// <summary>
+        /// Number of ticks of entity dirty history retained by PVS before the server falls back to a full entity scan
+        /// for lagging clients.
+        /// </summary>
+        public static readonly CVarDef<int> NetPvsDirtyBufferSize =
+            CVarDef.Create("net.pvs_dirty_buffer_size", 20, CVar.ARCHIVE | CVar.SERVERONLY);
+
+        /// <summary>
         /// This limits the number of new entities that can be sent to a client in a single game state. This exists to
         /// avoid stuttering on the client when it has to spawn a bunch of entities in a single tick. If ever entity
         /// spawning isn't hot garbage, this can be increased.

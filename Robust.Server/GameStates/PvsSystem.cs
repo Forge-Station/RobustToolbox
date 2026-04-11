@@ -41,9 +41,7 @@ internal sealed partial class PvsSystem : EntitySystem
     [Dependency] private readonly PvsOverrideSystem _pvsOverride = default!;
     [Dependency] private readonly IServerReplayRecordingManager _replay = default!;
 
-    // TODO make this a cvar. Make it in terms of seconds and tie it to tick rate?
-    // Main issue is that I CBF figuring out the logic for handling it changing mid-game.
-    public const int DirtyBufferSize = 20;
+    public const int DirtyBufferSizeDefault = 20;
     // Note: If a client has ping higher than TickBuffer / TickRate, then the server will treat every entity as if it
     // had entered PVS for the first time. Note that due to the PVS budget, this buffer is easily overwhelmed.
 
@@ -82,6 +80,7 @@ internal sealed partial class PvsSystem : EntitySystem
     private EntityQuery<MetaDataComponent> _metaQuery;
     private EntityQuery<TransformComponent> _xformQuery;
 
+    private int _dirtyBufferSize = DirtyBufferSizeDefault;
     private uint _oldestAck;
     private GameTick _lastOldestAck = GameTick.Zero;
 
@@ -114,6 +113,19 @@ internal sealed partial class PvsSystem : EntitySystem
             LabelNames = new[] {"area"},
             Buckets = Histogram.ExponentialBuckets(0.000_001, 1.5, 25)
         });
+    private static readonly Counter FullEnumerationCounter = Metrics.CreateCounter(
+        "robust_pvs_full_enumerations_total",
+        "Number of full entity enumeration fallbacks in PVS state generation.",
+        new CounterConfiguration
+        {
+            LabelNames = new[] {"reason"}
+        });
+    private static readonly Gauge DirtyBufferSizeGauge = Metrics.CreateGauge(
+        "robust_pvs_dirty_buffer_size",
+        "Current size of the PVS dirty history ring buffer in ticks.");
+    private static readonly Gauge OldestAckBehindGauge = Metrics.CreateGauge(
+        "robust_pvs_oldest_ack_behind_ticks",
+        "Current lag, in ticks, of the oldest session ack used by PVS.");
 
     public override void Initialize()
     {
@@ -146,6 +158,7 @@ internal sealed partial class PvsSystem : EntitySystem
         Subs.CVar(_configManager, CVars.NetMaxUpdateRange, OnViewsizeChanged, true);
         Subs.CVar(_configManager, CVars.NetPvsPriorityRange, OnPriorityRangeChanged, true);
         Subs.CVar(_configManager, CVars.NetForceAckThreshold, OnForceAckChanged, true);
+        Subs.CVar(_configManager, CVars.NetPvsDirtyBufferSize, OnDirtyBufferSizeChanged, true);
         Subs.CVar(_configManager, CVars.NetPvsAsync, OnAsyncChanged, true);
         Subs.CVar(_configManager, CVars.NetPvsCompressLevel, ResetParallelism, true);
 
@@ -188,13 +201,18 @@ internal sealed partial class PvsSystem : EntitySystem
     /// </summary>
     internal void SendGameStates(ICommonSession[] players)
     {
+        SendGameStates(players, players.Length);
+    }
+
+    internal void SendGameStates(ICommonSession[] players, int playerCount)
+    {
         _getStateHandlers ??= EntityManager.EventBusInternal.GetNetCompEventHandlers<ComponentGetState>();
 
         // Wait for pending jobs and process disconnected players
         ProcessDisconnections();
 
         // Ensure each session has a PvsSession entry before starting any parallel jobs.
-        CacheSessionData(players);
+        CacheSessionData(players, playerCount);
 
         // Get visible chunks, and update any dirty chunks.
         BeforeSerializeStates();
@@ -210,6 +228,7 @@ internal sealed partial class PvsSystem : EntitySystem
 
         // Compress & send the states.
         SendStates();
+        UpdatePvsMetrics();
 
         // Cull deletion history
         AfterSerializeStates();
@@ -278,10 +297,48 @@ internal sealed partial class PvsSystem : EntitySystem
         ForceAckThreshold = value;
     }
 
+    private void OnDirtyBufferSizeChanged(int value)
+    {
+        var newSize = Math.Max(1, value);
+        if (_dirtyBufferSize == newSize && _addEntities.Length != 0)
+            return;
+
+        _dirtyBufferSize = newSize;
+        DirtyBufferSizeGauge.Set(newSize);
+        ResizeDirtyBuffers(newSize);
+        ResetDirtyTrackingState();
+    }
+
     private void SetPvs(bool value)
     {
         _seenAllEnts.Clear();
         CullingEnabled = value;
+    }
+
+    private void ResetDirtyTrackingState()
+    {
+        PendingAcks.Clear();
+        _toAck.Clear();
+        _seenAllEnts.Clear();
+        _oldestAck = GameTick.MaxValue.Value;
+        _lastOldestAck = GameTick.Zero;
+
+        foreach (var session in PlayerData.Values)
+        {
+            ForceFullState(session);
+            session.ResizeHistory(_dirtyBufferSize);
+        }
+    }
+
+    private void UpdatePvsMetrics()
+    {
+        if (_oldestAck == GameTick.MaxValue.Value)
+        {
+            OldestAckBehindGauge.Set(0);
+            return;
+        }
+
+        OldestAckBehindGauge.Set(_gameTiming.CurTick.Value - _oldestAck);
     }
 
     private void CullDeletionHistory(GameTick oldestAck)
@@ -447,10 +504,10 @@ internal sealed partial class PvsSystem : EntitySystem
         }
     }
 
-    internal void CacheSessionData(ICommonSession[] players)
+    internal void CacheSessionData(ICommonSession[] players, int playerCount)
     {
-        Array.Resize(ref _sessions, players.Length);
-        for (var i = 0; i < players.Length; i++)
+        Array.Resize(ref _sessions, playerCount);
+        for (var i = 0; i < playerCount; i++)
         {
             _sessions[i] = GetOrNewPvsSession(players[i]);
         }

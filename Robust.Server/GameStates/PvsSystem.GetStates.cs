@@ -121,6 +121,7 @@ internal sealed partial class PvsSystem
         var toSend = _uidSetPool.Get();
         DebugTools.Assert(toSend.Count == 0);
         bool enumerateAll = false;
+        string? enumerateReason = null;
         DebugTools.AssertEqual(toTick, _gameTiming.CurTick);
         DebugTools.Assert(toTick > fromTick);
 
@@ -129,21 +130,26 @@ internal sealed partial class PvsSystem
         if (session == null)
         {
             enumerateAll = fromTick == GameTick.Zero;
+            if (enumerateAll)
+                enumerateReason = "replay_initial";
         }
         else if (!_seenAllEnts.Contains(session))
         {
             enumerateAll = true;
             fromTick = GameTick.Zero;
+            enumerateReason = "unseen_session";
         }
 
-        if (toTick.Value - fromTick.Value > DirtyBufferSize)
+        if (toTick.Value - fromTick.Value > (uint) _dirtyBufferSize)
         {
             // Fall back to enumerating over all entities.
             enumerateAll = true;
+            enumerateReason = "ack_lag";
         }
 
         if (enumerateAll)
         {
+            FullEnumerationCounter.WithLabels(enumerateReason ?? "unknown").Inc();
             var query = AllEntityQuery<MetaDataComponent>();
             while (query.MoveNext(out var uid, out var md))
             {
@@ -174,7 +180,7 @@ Transform last modified: {Transform(uid).LastModifiedTick}");
                 if (!TryGetDirtyEntities(new GameTick(i), out var add, out var dirty))
                 {
                     // This should be unreachable if `enumerateAll` is false.
-                    throw new Exception($"Failed to get tick dirty data. tick: {i}, from: {fromTick}, to {toTick}, buffer: {DirtyBufferSize}");
+                    throw new Exception($"Failed to get tick dirty data. tick: {i}, from: {fromTick}, to {toTick}, buffer: {_dirtyBufferSize}");
                 }
 
                 foreach (var uid in add)

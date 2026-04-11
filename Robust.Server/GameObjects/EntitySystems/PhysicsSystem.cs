@@ -1,4 +1,5 @@
 using JetBrains.Annotations;
+using Prometheus;
 using Robust.Server.Physics;
 using Robust.Shared;
 using Robust.Shared.Configuration;
@@ -14,6 +15,10 @@ namespace Robust.Server.GameObjects
     [UsedImplicitly]
     public sealed class PhysicsSystem : SharedPhysicsSystem
     {
+        private static readonly Gauge AwakeBodiesGauge = Metrics.CreateGauge(
+            "robust_server_physics_awake_bodies",
+            "Number of physics bodies currently awake on the server.");
+
         [Dependency] private readonly IConfigurationManager _configurationManager = default!;
 
         public override void Initialize()
@@ -33,6 +38,7 @@ namespace Robust.Server.GameObjects
         public override void Update(float frameTime)
         {
             SimulateWorld(frameTime, false);
+            AwakeBodiesGauge.Set(AwakeBodies.Count);
         }
     }
 }

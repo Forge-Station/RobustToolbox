@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using Prometheus;
@@ -19,17 +20,15 @@ namespace Robust.Server.GameStates
         /// <summary>
         /// if it's a new entity we need to GetEntityState from tick 0.
         /// </summary>
-        private HashSet<EntityUid>[] _addEntities = new HashSet<EntityUid>[DirtyBufferSize];
-        private HashSet<EntityUid>[] _dirtyEntities = new HashSet<EntityUid>[DirtyBufferSize];
+        private HashSet<EntityUid>[] _addEntities = Array.Empty<HashSet<EntityUid>>();
+        private HashSet<EntityUid>[] _dirtyEntities = Array.Empty<HashSet<EntityUid>>();
         private int _currentIndex = 1;
 
         private void InitializeDirty()
         {
-            for (var i = 0; i < DirtyBufferSize; i++)
-            {
-                _addEntities[i] = new HashSet<EntityUid>(32);
-                _dirtyEntities[i] = new HashSet<EntityUid>(32);
-            }
+            if (_addEntities.Length == 0)
+                ResizeDirtyBuffers(_dirtyBufferSize);
+
             EntityManager.EntityAdded += OnEntityAdd;
             EntityManager.EntityDirtied += OnEntityDirty;
         }
@@ -42,7 +41,7 @@ namespace Robust.Server.GameStates
 
         private void OnEntityAdd(Entity<MetaDataComponent> e)
         {
-            DebugTools.Assert(_currentIndex == _gameTiming.CurTick.Value % DirtyBufferSize ||
+            DebugTools.Assert(_currentIndex == _gameTiming.CurTick.Value % (uint) _dirtyBufferSize ||
                 _gameTiming.GetType().Name == "IGameTimingProxy");// Look I have NFI how best to excuse this assert if the game timing isn't real (a Mock<IGameTiming>).
             _addEntities[_currentIndex].Add(e);
         }
@@ -62,14 +61,14 @@ namespace Robust.Server.GameStates
         private bool TryGetDirtyEntities(GameTick tick, [NotNullWhen(true)] out HashSet<EntityUid>? addEntities, [NotNullWhen(true)] out HashSet<EntityUid>? dirtyEntities)
         {
             var currentTick = _gameTiming.CurTick;
-            if (currentTick.Value - tick.Value >= DirtyBufferSize)
+            if (currentTick.Value - tick.Value >= (uint) _dirtyBufferSize)
             {
                 addEntities = null;
                 dirtyEntities = null;
                 return false;
             }
 
-            var index = tick.Value % DirtyBufferSize;
+            var index = (int) (tick.Value % (uint) _dirtyBufferSize);
             addEntities = _addEntities[index];
             dirtyEntities = _dirtyEntities[index];
             return true;
@@ -87,9 +86,23 @@ namespace Robust.Server.GameStates
                 }
             }
 
-            _currentIndex = ((int)_gameTiming.CurTick.Value + 1) % DirtyBufferSize;
+            _currentIndex = (int) ((_gameTiming.CurTick.Value + 1) % (uint) _dirtyBufferSize);
             _addEntities[_currentIndex].Clear();
             _dirtyEntities[_currentIndex].Clear();
+        }
+
+        private void ResizeDirtyBuffers(int size)
+        {
+            _addEntities = new HashSet<EntityUid>[size];
+            _dirtyEntities = new HashSet<EntityUid>[size];
+
+            for (var i = 0; i < size; i++)
+            {
+                _addEntities[i] = new HashSet<EntityUid>(32);
+                _dirtyEntities[i] = new HashSet<EntityUid>(32);
+            }
+
+            _currentIndex = size == 1 ? 0 : (int) (_gameTiming.CurTick.Value % (uint) size);
         }
     }
 }

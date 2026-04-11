@@ -18,7 +18,7 @@ namespace Robust.Server.GameStates;
 /// <summary>
 /// Class for storing session specific PVS data.
 /// </summary>
-internal sealed class PvsSession(ICommonSession session, ResizableMemoryRegion<PvsData> memoryRegion)
+internal sealed class PvsSession(ICommonSession session, ResizableMemoryRegion<PvsData> memoryRegion, int dirtyBufferSize)
 {
 #if DEBUG
     public HashSet<NetEntity> ToSendSet = new();
@@ -31,13 +31,13 @@ internal sealed class PvsSession(ICommonSession session, ResizableMemoryRegion<P
     public INetChannel Channel => Session.Channel;
 
     /// <summary>
-    /// All entities that this session saw during the last <see cref="PvsSystem.DirtyBufferSize"/> ticks.
+    /// All entities that this session saw during the last dirty-buffer window.
     /// </summary>
-    public readonly OverflowDictionary<GameTick, List<PvsIndex>> PreviouslySent = new(PvsSystem.DirtyBufferSize);
+    public OverflowDictionary<GameTick, List<PvsIndex>> PreviouslySent = new(dirtyBufferSize);
 
     /// <summary>
-    /// <see cref="PreviouslySent"/> overflow in case a player's last ack is more than
-    /// <see cref="PvsSystem.DirtyBufferSize"/> ticks behind the current tick.
+    /// <see cref="PreviouslySent"/> overflow in case a player's last ack is more than the dirty-buffer window behind
+    /// the current tick.
     /// </summary>
     public (GameTick Tick, List<PvsIndex> SentEnts)? Overflow;
 
@@ -131,6 +131,11 @@ internal sealed class PvsSession(ICommonSession session, ResizableMemoryRegion<P
     /// Whether we should force reliable sending of the <see cref="MsgState"/>.
     /// </summary>
     public bool ForceSendReliably { get; set; }
+
+    public void ResizeHistory(int dirtyBufferSize)
+    {
+        PreviouslySent = new OverflowDictionary<GameTick, List<PvsIndex>>(dirtyBufferSize);
+    }
 
     /// <summary>
     /// Clears all stored game state data. This should only be used after the game state has been serialized.
