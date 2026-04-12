@@ -86,6 +86,16 @@ namespace Robust.UnitTesting
             throw new NotSupportedException();
         }
 
+        public void LoadPrewarmStrings()
+        {
+            // Integration tests do not use the on-disk prewarm cache.
+        }
+
+        public void SavePrewarmStrings()
+        {
+            // Integration tests do not use the on-disk prewarm cache.
+        }
+
         private sealed class TypeSerializerImpl : IStaticTypeSerializer
         {
             public bool Handles(Type type)
