@@ -287,6 +287,24 @@ namespace Robust.Shared
             CVarDef.Create("net.pvs_compress_level", 3, CVar.ARCHIVE);
 
         /// <summary>
+        /// Whether the server should persist frequently missed mapped strings and prewarm them on the next boot.
+        /// </summary>
+        public static readonly CVarDef<bool> NetMappedStringPrewarm =
+            CVarDef.Create("net.mapped_string_prewarm", true, CVar.ARCHIVE | CVar.SERVERONLY);
+
+        /// <summary>
+        /// Minimum number of runtime misses before a string is persisted into the prewarm cache.
+        /// </summary>
+        public static readonly CVarDef<int> NetMappedStringPrewarmMinCount =
+            CVarDef.Create("net.mapped_string_prewarm_min_count", 8, CVar.ARCHIVE | CVar.SERVERONLY);
+
+        /// <summary>
+        /// Maximum number of persisted missed strings that will be prewarmed on the next server boot.
+        /// </summary>
+        public static readonly CVarDef<int> NetMappedStringPrewarmCount =
+            CVarDef.Create("net.mapped_string_prewarm_count", 4096, CVar.ARCHIVE | CVar.SERVERONLY);
+
+        /// <summary>
         /// Log late input messages from clients.
         /// </summary>
         public static readonly CVarDef<bool> NetLogLateMsg =

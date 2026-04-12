@@ -528,13 +528,14 @@ public abstract partial class SharedPhysicsSystem
                 }
                 else
                 {
-                    // TODO maybe change this? Needs benchmarking.
-                    // Instead of transforming both boxes (which enlarges both aabbs), maybe just transform one box.
-                    // I.e. use (matrixA * invMatrixB).TransformBox(). Or (invMatrixB * matrixA), whichever is correct.
-                    // Alternatively, maybe just directly construct the relative transform matrix?
-                    var proxyAWorldAABB = _transform.GetWorldMatrix(XformQuery.GetComponent(broadphaseA.Value)).TransformBox(proxyA.AABB);
-                    var proxyBWorldAABB = _transform.GetWorldMatrix(XformQuery.GetComponent(broadphaseB.Value)).TransformBox(proxyB.AABB);
-                    overlap = proxyAWorldAABB.Intersects(proxyBWorldAABB);
+                    var (_, _, broadphaseAWorldMatrix, _) =
+                        _transform.GetWorldPositionRotationMatrixWithInv(XformQuery.GetComponent(broadphaseA.Value), XformQuery);
+                    var (_, _, _, broadphaseBInvWorldMatrix) =
+                        _transform.GetWorldPositionRotationMatrixWithInv(XformQuery.GetComponent(broadphaseB.Value), XformQuery);
+
+                    // Transform one proxy into the other's local broadphase instead of expanding both into world-space.
+                    var proxyAInBroadphaseB = (broadphaseAWorldMatrix * broadphaseBInvWorldMatrix).TransformBox(proxyA.AABB);
+                    overlap = proxyAInBroadphaseB.Intersects(proxyB.AABB);
                 }
             }
 

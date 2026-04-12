@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Buffers;
 using System.Collections.Frozen;
 using System.Collections.Generic;
@@ -25,6 +25,7 @@ namespace Robust.Shared.Serialization
         internal sealed class MappedStringDict
         {
             private readonly ISawmill _sawmill;
+            private readonly Action<string>? _recordMiss;
             public bool Locked { get; set; }
 
             // All the mapped strings.
@@ -38,9 +39,10 @@ namespace Robust.Shared.Serialization
 
             public int StringCount => _mappedStrings?.Length ?? 0;
 
-            public MappedStringDict(ISawmill sawmill)
+            public MappedStringDict(ISawmill sawmill, Action<string>? recordMiss = null)
             {
                 _sawmill = sawmill;
+                _recordMiss = recordMiss;
             }
 
             public void FinalizeMapping()
@@ -442,6 +444,7 @@ namespace Robust.Shared.Serialization
                 Primitives.WritePrimitive(stream, value);
                 StringsMissMetric.Inc();
                 StringsMissCharsMetric.Inc(value.Length);
+                _recordMiss?.Invoke(value);
             }
 
             [MethodImpl(MethodImplOptions.AggressiveInlining)]

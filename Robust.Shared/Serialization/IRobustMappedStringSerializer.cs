@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Reflection;
 using System.Threading.Tasks;
@@ -103,5 +103,7 @@ namespace Robust.Shared.Serialization
 
         (byte[] mapHash, byte[] package) GeneratePackage();
         void SetPackage(byte[] hash, byte[] package);
+        void LoadPrewarmStrings();
+        void SavePrewarmStrings();
     }
 }

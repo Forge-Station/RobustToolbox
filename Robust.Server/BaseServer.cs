@@ -414,6 +414,7 @@ namespace Robust.Server
 
             // String serializer has to be locked before PostInit as content can depend on it (e.g., replays that start
             // automatically recording on startup).
+            _stringSerializer.LoadPrewarmStrings();
             AddFinalStringsToSerializer();
             _stringSerializer.LockStrings();
 
@@ -676,6 +677,7 @@ namespace Robust.Server
         // called right before main loop returns, do all saving/cleanup in here
         public void Cleanup()
         {
+            _stringSerializer.SavePrewarmStrings();
             _replay.Shutdown();
 
             _modLoader.Shutdown();

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
@@ -9,7 +10,9 @@ using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using NetSerializer;
 using Prometheus;
+using Robust.Shared;
 using Robust.Shared.ContentPack;
+using Robust.Shared.Configuration;
 using Robust.Shared.IoC;
 using Robust.Shared.Log;
 using Robust.Shared.Network;
@@ -96,7 +99,9 @@ namespace Robust.Shared.Serialization
         /// mapping of that value <c> - FirstMappedIndexStart</c>.
         /// </remarks>
         private const uint FirstMappedIndexStart = 2;
+        private const string PrewarmCacheFileName = "mapped-string-prewarm.tsv";
 
+        [Dependency] private readonly IConfigurationManager _cfg = default!;
         [Dependency] private readonly INetManager _net = default!;
 
         // I don't want to create 50 line changes in this commit so...
@@ -111,6 +116,7 @@ namespace Robust.Shared.Serialization
         private byte[]? _mappedStringsPackage;
         private byte[]? _serverHash;
         private byte[]? _stringMapHash;
+        private readonly ConcurrentDictionary<string, int> _missedStrings = new(StringComparer.Ordinal);
 
         /// <value>
         /// The hash of the string mapping.
@@ -573,6 +579,99 @@ namespace Robust.Shared.Serialization
             }
         }
 
+        public void LoadPrewarmStrings()
+        {
+            try
+            {
+                if (_net.IsClient || _dict.Locked || !_cfg.GetCVar(CVars.NetMappedStringPrewarm))
+                    return;
+
+                var path = PathHelpers.ExecutableRelativeFile(PrewarmCacheFileName);
+                if (!File.Exists(path))
+                    return;
+
+                var minCount = Math.Max(1, _cfg.GetCVar(CVars.NetMappedStringPrewarmMinCount));
+                var maxCount = Math.Max(0, _cfg.GetCVar(CVars.NetMappedStringPrewarmCount));
+                if (maxCount == 0)
+                    return;
+
+                var added = 0;
+                var considered = 0;
+
+                foreach (var line in File.ReadLines(path))
+                {
+                    if (string.IsNullOrWhiteSpace(line))
+                        continue;
+
+                    var split = line.IndexOf('\t');
+                    if (split <= 0)
+                        continue;
+
+                    if (!int.TryParse(line.AsSpan(0, split), out var count) || count < minCount)
+                        continue;
+
+                    try
+                    {
+                        var value = line[(split + 1)..];
+                        var decoded = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(value));
+                        _dict.AddString(decoded);
+                        added++;
+                        considered++;
+                    }
+                    catch (Exception e)
+                    {
+                        LogSzr.Warning($"Failed to read mapped string prewarm entry: {e.Message}");
+                    }
+
+                    if (considered >= maxCount)
+                        break;
+                }
+
+                if (added > 0)
+                    LogSzr.Info($"Prewarmed {added} mapped strings from runtime miss cache.");
+            }
+            catch (Exception e)
+            {
+                LogSzr.Warning($"Failed to load mapped string prewarm cache: {e.Message}");
+            }
+        }
+
+        public void SavePrewarmStrings()
+        {
+            try
+            {
+                if (_net.IsClient || !_cfg.GetCVar(CVars.NetMappedStringPrewarm))
+                    return;
+
+                var minCount = Math.Max(1, _cfg.GetCVar(CVars.NetMappedStringPrewarmMinCount));
+                var maxCount = Math.Max(0, _cfg.GetCVar(CVars.NetMappedStringPrewarmCount));
+                var path = PathHelpers.ExecutableRelativeFile(PrewarmCacheFileName);
+
+                if (maxCount == 0)
+                {
+                    if (File.Exists(path))
+                        File.Delete(path);
+                    return;
+                }
+
+                var lines = _missedStrings
+                    .Where(kv => kv.Value >= minCount)
+                    .OrderByDescending(kv => kv.Value)
+                    .ThenBy(kv => kv.Key, StringComparer.Ordinal)
+                    .Take(maxCount)
+                    .Select(kv => $"{kv.Value}\t{Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(kv.Key))}")
+                    .ToArray();
+
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                File.WriteAllLines(path, lines);
+                LogSzr.Info($"Saved {lines.Length} mapped string prewarm entries.");
+            }
+            catch (Exception e)
+            {
+                LogSzr.Warning($"Failed to save mapped string prewarm cache: {e.Message}");
+            }
+        }
+
         /// <summary>
         /// Implements <see cref="ITypeSerializer.Handles"/>.
         /// Specifies that this implementation handles strings.
@@ -672,7 +771,7 @@ namespace Robust.Shared.Serialization
         public void Initialize()
         {
             LogSzr = Logger.GetSawmill("szr");
-            _dict = new MappedStringDict(LogSzr);
+            _dict = new MappedStringDict(LogSzr, RecordMissedString);
 
             if (_net.IsClient)
             {
@@ -681,6 +780,17 @@ namespace Robust.Shared.Serialization
             }
 
             NetworkInitialize();
+        }
+
+        private void RecordMissedString(string value)
+        {
+            if (!_net.IsServer || !_cfg.GetCVar(CVars.NetMappedStringPrewarm))
+                return;
+
+            if (string.IsNullOrWhiteSpace(value) || !value.IsNormalized())
+                return;
+
+            _missedStrings.AddOrUpdate(value, 1, static (_, count) => count + 1);
         }
 
         private sealed class InProgressHandshake
