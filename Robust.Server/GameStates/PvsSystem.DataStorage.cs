@@ -283,13 +283,6 @@ internal sealed partial class PvsSystem
     /// </summary>
     private void OnEntityDeleted(Entity<MetaDataComponent> entity)
     {
-        // Forge-Change-start: invalidate the global-override cache if a cached descendant of a globally-overridden
-        // entity is being deleted. PvsOverrideSystem.OnDeleted already covers entities in ForceSend/GlobalOverride
-        // directly via Clear(), but cached descendants of GlobalOverride are only present here.
-        if (_globalOverrideSet.Count != 0 && _globalOverrideSet.Contains(entity.Owner))
-            _pvsOverride.CacheDirty = true;
-        // Forge-Change-end
-
         var ptr = entity.Comp.PvsData;
         entity.Comp.PvsData = PvsIndex.Invalid;
 
