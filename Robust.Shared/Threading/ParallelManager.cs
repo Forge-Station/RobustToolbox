@@ -132,13 +132,11 @@ internal sealed class ParallelManager : IParallelManagerInternal
     private void UpdateCVar(int value)
     {
         var oldCount = ParallelProcessCount;
-        ThreadPool.GetAvailableThreads(out var oldWorker, out var oldCompletion);
-        ParallelProcessCount = value == 0 ? oldWorker : value;
+        ParallelProcessCount = value == 0 ? Environment.ProcessorCount : value;
 
         if (oldCount != ParallelProcessCount)
         {
             ParallelCountChanged?.Invoke();
-            ThreadPool.SetMaxThreads(ParallelProcessCount, oldCompletion);
         }
     }
 
