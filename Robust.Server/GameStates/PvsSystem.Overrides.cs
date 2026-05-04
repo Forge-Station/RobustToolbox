@@ -165,6 +165,15 @@ internal sealed partial class PvsSystem
 
     private void CacheGlobalOverrides()
     {
+        // Forge-Change-start: skip rebuild when nothing relevant changed since last tick.
+        // Dirty is tripped by PvsOverrideSystem on Add/Remove, and by transform/lifecycle handlers
+        // in PvsSystem.Entity.cs / PvsSystem.DataStorage.cs when an entity in either cached set
+        // (or a direct child of a globally-overridden entity) moves, is created, or is deleted.
+        if (!_pvsOverride.CacheDirty)
+            return;
+        _pvsOverride.CacheDirty = false;
+        // Forge-Change-end
+
         _cachedForceOverride.Clear();
         _forceOverrideSet.Clear();
         foreach (var uid in _pvsOverride.ForceSend)

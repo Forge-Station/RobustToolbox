@@ -24,6 +24,13 @@ public sealed class PvsOverrideSystem : SharedPvsOverrideSystem
     internal Dictionary<ICommonSession, HashSet<EntityUid>> SessionOverrides = new();
     internal Dictionary<ICommonSession, HashSet<EntityUid>> SessionForceSend = new();
 
+    // Forge-Change-start
+    // Set whenever the global ForceSend / GlobalOverride sets, or anything they cache (parent chains, descendants),
+    // change. PvsSystem uses this to skip the per-tick rebuild of _cachedForceOverride / _cachedGlobalOverride.
+    // Initialized to true so the first cache build always runs.
+    internal bool CacheDirty = true;
+    // Forge-Change-end
+
     public override void Initialize()
     {
         base.Initialize();
@@ -117,8 +124,9 @@ public sealed class PvsOverrideSystem : SharedPvsOverrideSystem
         if (!_hasOverride.Remove(uid))
             return;
 
-        ForceSend.Remove(uid);
-        GlobalOverride.Remove(uid);
+        if (ForceSend.Remove(uid) | GlobalOverride.Remove(uid)) // Forge-Change
+            CacheDirty = true; // Forge-Change
+
         foreach (var (session, set) in SessionOverrides)
         {
             if (set.Remove(uid) && set.Count == 0)
@@ -141,7 +149,10 @@ public sealed class PvsOverrideSystem : SharedPvsOverrideSystem
         base.AddGlobalOverride(uid);
 
         if (GlobalOverride.Add(uid))
+        {
             _hasOverride.Add(uid);
+            CacheDirty = true; // Forge-Change
+        }
     }
 
     /// <summary>
@@ -151,7 +162,8 @@ public sealed class PvsOverrideSystem : SharedPvsOverrideSystem
     {
         base.RemoveGlobalOverride(uid);
 
-        GlobalOverride.Remove(uid);
+        if (GlobalOverride.Remove(uid)) // Forge-Change
+            CacheDirty = true; // Forge-Change
         // Not bothering to clear _hasOverride, as we'd have to check all the other collections, and at that point we
         // might as well just do that when the entity gets deleted anyways.
     }
@@ -167,12 +179,16 @@ public sealed class PvsOverrideSystem : SharedPvsOverrideSystem
     public void AddForceSend(EntityUid uid)
     {
         if (ForceSend.Add(uid))
+        {
             _hasOverride.Add(uid);
+            CacheDirty = true; // Forge-Change
+        }
     }
 
     public void RemoveForceSend(EntityUid uid)
     {
-        ForceSend.Remove(uid);
+        if (ForceSend.Remove(uid)) // Forge-Change
+            CacheDirty = true; // Forge-Change
         // Not bothering to clear _hasOverride, as we'd have to check all the other collections, and at that point we
         // might as well just do that when the entity gets deleted anyways.
     }

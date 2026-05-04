@@ -11,6 +11,25 @@ internal sealed partial class PvsSystem
 {
     private void OnEntityMove(ref MoveEvent ev)
     {
+        // Forge-Change-start: invalidate the global-override cache when an entity in (or moving in/out of) a cached
+        // override subtree moves. Cheap O(1) hashset lookups guarded by Count != 0 to skip cost when no overrides exist.
+        var movedUid = ev.Entity.Owner;
+        var newParent = ev.Entity.Comp1.ParentUid;
+        var oldParent = ev.OldPosition.EntityId;
+
+        if (_globalOverrideSet.Count != 0 && (
+                _globalOverrideSet.Contains(movedUid) ||
+                _globalOverrideSet.Contains(newParent) ||
+                _globalOverrideSet.Contains(oldParent)))
+        {
+            _pvsOverride.CacheDirty = true;
+        }
+        else if (_forceOverrideSet.Count != 0 && _forceOverrideSet.Contains(movedUid))
+        {
+            _pvsOverride.CacheDirty = true;
+        }
+        // Forge-Change-end
+
         UpdatePosition(ev.Entity.Owner, ev.Entity.Comp1, ev.Entity.Comp2, ev.OldPosition.EntityId);
     }
 
@@ -18,6 +37,11 @@ internal sealed partial class PvsSystem
     {
         if (component.ParentUid == EntityUid.Invalid)
             return;
+
+        // Forge-Change-start: a fresh entity born under a globally-overridden subtree must be added to the cache.
+        if (_globalOverrideSet.Count != 0 && _globalOverrideSet.Contains(component.ParentUid))
+            _pvsOverride.CacheDirty = true;
+        // Forge-Change-end
 
         UpdatePosition(uid, component, MetaData(uid), EntityUid.Invalid);
     }
