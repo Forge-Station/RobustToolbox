@@ -637,12 +637,11 @@ public abstract partial class SharedPhysicsSystem
         islands.Sort(static (x, y) => InternalParallel(y).CompareTo(InternalParallel(x)));
 
         var totalBodies = 0;
-        var actualIslands = islands.ToArray();
-
         for (var i = 0; i < islands.Count; i++)
         {
-            ref var island = ref actualIslands[i];
+            var island = islands[i];
             island.Offset = totalBodies;
+            islands[i] = island;
             UpdateLerpData(island.Bodies);
 
 #if DEBUG
@@ -669,27 +668,27 @@ public abstract partial class SharedPhysicsSystem
             MaxDegreeOfParallelism = _parallel.ParallelProcessCount,
         };
 
-        while (iBegin < actualIslands.Length)
+        while (iBegin < islands.Count)
         {
-            ref var island = ref actualIslands[iBegin];
+            var island = islands[iBegin];
 
             if (!InternalParallel(island))
                 break;
 
-            SolveIsland(ref island, in data, options, prediction, solvedPositions, solvedAngles, linearVelocities, angularVelocities, sleepStatus);
+            SolveIsland(island, in data, options, prediction, solvedPositions, solvedAngles, linearVelocities, angularVelocities, sleepStatus);
             iBegin++;
         }
 
-        Parallel.For(iBegin, actualIslands.Length, options, i =>
+        Parallel.For(iBegin, islands.Count, options, i =>
         {
-            ref var island = ref actualIslands[i];
-            SolveIsland(ref island, in data, null, prediction, solvedPositions, solvedAngles, linearVelocities, angularVelocities, sleepStatus);
+            var island = islands[i];
+            SolveIsland(island, in data, null, prediction, solvedPositions, solvedAngles, linearVelocities, angularVelocities, sleepStatus);
         });
 
         // Update data sequentially
-        for (var i = 0; i < actualIslands.Length; i++)
+        for (var i = 0; i < islands.Count; i++)
         {
-            ref readonly var island = ref actualIslands[i];
+            var island = islands[i];
 
             UpdateBodies(in island, solvedPositions, solvedAngles, linearVelocities, angularVelocities);
             SleepBodies(in island, sleepStatus);
@@ -727,7 +726,7 @@ public abstract partial class SharedPhysicsSystem
     ///     Go through all the bodies in this island and solve.
     /// </summary>
     private void SolveIsland(
-        ref IslandData island,
+        IslandData island,
         in SolverData data,
         ParallelOptions? options,
         bool prediction,
