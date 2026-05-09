@@ -339,8 +339,11 @@ namespace Robust.Shared
             CVarDef.Create("net.entity_msg_max_future_ticks", 10, CVar.SERVERONLY);
         public static readonly CVarDef<int> NetEntityMsgTickBudget =
             CVarDef.Create("net.entity_msg_tick_budget", 2048, CVar.SERVERONLY);
+        /// <summary>
+        /// Max queued entity deletions to process per tick (server and client). Not SERVERONLY: EntityManager subscribes on both.
+        /// </summary>
         public static readonly CVarDef<int> EntQueuedDeletionTickBudget =
-            CVarDef.Create("ent.queued_deletion_tick_budget", 2048, CVar.SERVERONLY);
+            CVarDef.Create("ent.queued_deletion_tick_budget", 2048, CVar.ARCHIVE);
 
         /// <summary>
         /// Ticks per second on the server.
