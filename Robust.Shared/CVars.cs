@@ -278,6 +278,43 @@ namespace Robust.Shared
             CVarDef.Create("net.pvs_max_entity_states", 50000, CVar.SERVERONLY);
 
         /// <summary>
+        /// PVS parallel execution mode:
+        /// 0 = auto, 1 = sequential, 2 = hybrid, 3 = always parallel.
+        /// </summary>
+        public static readonly CVarDef<int> NetPvsParallelMode =
+            CVarDef.Create("net.pvs_parallel_mode", 0, CVar.ARCHIVE | CVar.SERVERONLY);
+
+        /// <summary>
+        /// Minimum amount of player sessions before serialize step goes parallel in auto/hybrid modes.
+        /// </summary>
+        public static readonly CVarDef<int> NetPvsParallelSerializeMinSessions =
+            CVarDef.Create("net.pvs_parallel_serialize_min_sessions", 6, CVar.ARCHIVE | CVar.SERVERONLY);
+
+        /// <summary>
+        /// Minimum amount of player sessions before send step goes parallel in auto/hybrid modes.
+        /// </summary>
+        public static readonly CVarDef<int> NetPvsParallelSendMinSessions =
+            CVarDef.Create("net.pvs_parallel_send_min_sessions", 4, CVar.ARCHIVE | CVar.SERVERONLY);
+
+        /// <summary>
+        /// Target items per worker for auto-mode degree selection.
+        /// </summary>
+        public static readonly CVarDef<int> NetPvsParallelTargetBatchPerWorker =
+            CVarDef.Create("net.pvs_parallel_target_batch_per_worker", 2, CVar.ARCHIVE | CVar.SERVERONLY);
+
+        /// <summary>
+        /// Optional upper cap for serialize parallelism. 0 means use all available workers.
+        /// </summary>
+        public static readonly CVarDef<int> NetPvsParallelSerializeMaxDegree =
+            CVarDef.Create("net.pvs_parallel_serialize_max_degree", 0, CVar.ARCHIVE | CVar.SERVERONLY);
+
+        /// <summary>
+        /// Optional upper cap for send parallelism. 0 means use all available workers.
+        /// </summary>
+        public static readonly CVarDef<int> NetPvsParallelSendMaxDegree =
+            CVarDef.Create("net.pvs_parallel_send_max_degree", 0, CVar.ARCHIVE | CVar.SERVERONLY);
+
+        /// <summary>
         /// The amount of pvs-exiting entities that a client will process in a single tick.
         /// </summary>
         public static readonly CVarDef<int> NetPVSEntityExitBudget =
@@ -300,6 +337,10 @@ namespace Robust.Shared
             CVarDef.Create("net.entity_msg_queue_limit", 8192, CVar.SERVERONLY);
         public static readonly CVarDef<int> NetEntityMsgMaxFutureTicks =
             CVarDef.Create("net.entity_msg_max_future_ticks", 10, CVar.SERVERONLY);
+        public static readonly CVarDef<int> NetEntityMsgTickBudget =
+            CVarDef.Create("net.entity_msg_tick_budget", 2048, CVar.SERVERONLY);
+        public static readonly CVarDef<int> EntQueuedDeletionTickBudget =
+            CVarDef.Create("ent.queued_deletion_tick_budget", 2048, CVar.SERVERONLY);
 
         /// <summary>
         /// Ticks per second on the server.

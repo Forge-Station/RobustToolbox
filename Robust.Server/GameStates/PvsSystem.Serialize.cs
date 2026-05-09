@@ -22,9 +22,23 @@ internal sealed partial class PvsSystem
     /// </summary>
     private void SerializeStates()
     {
-        using var _ = Histogram.WithLabels("Serialize States").NewTimer();
-        var opts = new ParallelOptions {MaxDegreeOfParallelism = _parallelMgr.ParallelProcessCount};
         _oldestAck = GameTick.MaxValue.Value;
+        var parallelism = GetSerializeParallelism(_sessions.Length);
+
+        if (parallelism <= 1)
+        {
+            using var _ = Histogram.WithLabels("Serialize States Sequential").NewTimer();
+            SerializeState(-1);
+            for (var i = 0; i < _sessions.Length; i++)
+            {
+                SerializeState(i);
+            }
+
+            return;
+        }
+
+        using var __ = Histogram.WithLabels("Serialize States Parallel").NewTimer();
+        var opts = new ParallelOptions { MaxDegreeOfParallelism = parallelism };
         Parallel.For(-1, _sessions.Length, opts, SerializeState);
     }
 

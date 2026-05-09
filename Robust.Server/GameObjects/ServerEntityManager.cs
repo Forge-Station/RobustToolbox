@@ -151,6 +151,7 @@ namespace Robust.Server.GameObjects
         private bool _logLateMsgs;
         private int _entityMsgQueueLimit;
         private int _entityMsgMaxFutureTicks;
+        private int _entityMsgTickBudget;
 
         /// <inheritdoc />
         public void SetupNetworking()
@@ -162,6 +163,7 @@ namespace Robust.Server.GameObjects
             _configurationManager.OnValueChanged(CVars.NetLogLateMsg, b => _logLateMsgs = b, true);
             _configurationManager.OnValueChanged(CVars.NetEntityMsgQueueLimit, v => _entityMsgQueueLimit = Math.Max(0, v), true);
             _configurationManager.OnValueChanged(CVars.NetEntityMsgMaxFutureTicks, v => _entityMsgMaxFutureTicks = Math.Max(0, v), true);
+            _configurationManager.OnValueChanged(CVars.NetEntityMsgTickBudget, v => _entityMsgTickBudget = Math.Max(0, v), true);
         }
 
         /// <inheritdoc />
@@ -169,9 +171,14 @@ namespace Robust.Server.GameObjects
         {
             using (histogram?.WithLabels("EntityNet").NewTimer())
             {
+                var budget = _entityMsgTickBudget;
+                var processed = 0;
                 while (_queue.Count != 0 && _queue.Peek().SourceTick <= _gameTiming.CurTick)
                 {
                     DispatchEntityNetworkMessage(_queue.Take());
+
+                    if (budget > 0 && ++processed >= budget)
+                        break;
                 }
             }
 

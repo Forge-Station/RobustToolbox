@@ -29,6 +29,14 @@ namespace Robust.Server.GameStates;
 
 internal sealed partial class PvsSystem : EntitySystem
 {
+    private enum PvsParallelMode
+    {
+        Auto = 0,
+        Sequential = 1,
+        Hybrid = 2,
+        Parallel = 3
+    }
+
     [Dependency] private readonly IConfigurationManager _configManager = default!;
     [Dependency] private readonly INetworkedMapManager _mapManager = default!;
     [Dependency] private readonly IServerEntityNetworkManager _netEntMan = default!;
@@ -45,7 +53,7 @@ internal sealed partial class PvsSystem : EntitySystem
 
     // TODO make this a cvar. Make it in terms of seconds and tie it to tick rate?
     // Main issue is that I CBF figuring out the logic for handling it changing mid-game.
-    public const int DirtyBufferSize = 20;
+    public const int DirtyBufferSize = 60;
     // Note: If a client has ping higher than TickBuffer / TickRate, then the server will treat every entity as if it
     // had entered PVS for the first time. Note that due to the PVS budget, this buffer is easily overwhelmed.
 
@@ -110,6 +118,12 @@ internal sealed partial class PvsSystem : EntitySystem
     private PvsSession[] _sessions = default!;
 
     private bool _async;
+    private PvsParallelMode _parallelMode;
+    private int _serializeMinParallelSessions;
+    private int _sendMinParallelSessions;
+    private int _parallelTargetBatchPerWorker;
+    private int _maxSerializeDegree;
+    private int _maxSendDegree;
 
     private DefaultObjectPool<PvsThreadResources> _threadResourcesPool = default!;
     private EntityEventBus.DirectedEventHandler?[]? _getStateHandlers;
@@ -136,6 +150,14 @@ internal sealed partial class PvsSystem : EntitySystem
     private static readonly Gauge PvsMetadataCurrentSizeGauge = Metrics.CreateGauge(
         "robust_pvs_metadata_current_size",
         "Current allocated size of PVS metadata memory region.");
+
+    private static readonly Counter PvsFullEnumerationCounter = Metrics.CreateCounter(
+        "robust_pvs_full_enumeration_total",
+        "How often PVS all-entity enumeration path is used, grouped by reason.",
+        new CounterConfiguration
+        {
+            LabelNames = new[] {"reason"}
+        });
 
     public override void Initialize()
     {
@@ -171,6 +193,12 @@ internal sealed partial class PvsSystem : EntitySystem
         Subs.CVar(_configManager, CVars.NetPvsAsync, OnAsyncChanged, true);
         Subs.CVar(_configManager, CVars.NetPvsCompressLevel, ResetParallelism, true);
         Subs.CVar(_configManager, CVars.NetPvsMaxEntityStates, v => _maxEntityStates = Math.Max(0, v), true);
+        Subs.CVar(_configManager, CVars.NetPvsParallelMode, OnParallelModeChanged, true);
+        Subs.CVar(_configManager, CVars.NetPvsParallelSerializeMinSessions, v => _serializeMinParallelSessions = Math.Max(1, v), true);
+        Subs.CVar(_configManager, CVars.NetPvsParallelSendMinSessions, v => _sendMinParallelSessions = Math.Max(1, v), true);
+        Subs.CVar(_configManager, CVars.NetPvsParallelTargetBatchPerWorker, v => _parallelTargetBatchPerWorker = Math.Max(1, v), true);
+        Subs.CVar(_configManager, CVars.NetPvsParallelSerializeMaxDegree, v => _maxSerializeDegree = Math.Max(0, v), true);
+        Subs.CVar(_configManager, CVars.NetPvsParallelSendMaxDegree, v => _maxSendDegree = Math.Max(0, v), true);
 
         _serverGameStateManager.ClientAck += OnClientAck;
         _serverGameStateManager.ClientRequestFull += OnClientRequestFull;
@@ -209,7 +237,7 @@ internal sealed partial class PvsSystem : EntitySystem
     /// <summary>
     /// Send this tick's game state data to players.
     /// </summary>
-    internal void SendGameStates(ICommonSession[] players)
+    internal void SendGameStates(IReadOnlyList<ICommonSession> players)
     {
         _getStateHandlers ??= EntityManager.EventBusInternal.GetNetCompEventHandlers<ComponentGetState>();
 
@@ -288,6 +316,67 @@ internal sealed partial class PvsSystem : EntitySystem
         _async = value;
     }
 
+    private void OnParallelModeChanged(int value)
+    {
+        _parallelMode = value switch
+        {
+            1 => PvsParallelMode.Sequential,
+            2 => PvsParallelMode.Hybrid,
+            3 => PvsParallelMode.Parallel,
+            _ => PvsParallelMode.Auto
+        };
+    }
+
+    private int GetSerializeParallelism(int sessionCount)
+    {
+        // +1 accounts for replay update work item.
+        return GetParallelism(sessionCount + 1, _serializeMinParallelSessions, _maxSerializeDegree);
+    }
+
+    private int GetSendParallelism(int sessionCount)
+    {
+        return GetParallelism(sessionCount, _sendMinParallelSessions, _maxSendDegree);
+    }
+
+    private int GetParallelism(int workItems, int minParallelItems, int configuredMaxDegree)
+    {
+        if (workItems <= 1)
+            return 1;
+
+        var available = Math.Max(1, _parallelMgr.ParallelProcessCount);
+        var maxDegree = configuredMaxDegree > 0
+            ? Math.Min(configuredMaxDegree, available)
+            : available;
+
+        return _parallelMode switch
+        {
+            PvsParallelMode.Sequential => 1,
+            PvsParallelMode.Parallel => maxDegree,
+            PvsParallelMode.Hybrid => workItems >= minParallelItems ? maxDegree : 1,
+            _ => GetAutoParallelism(workItems, minParallelItems, maxDegree)
+        };
+    }
+
+    private int GetAutoParallelism(int workItems, int minParallelItems, int maxDegree)
+    {
+        if (workItems < minParallelItems)
+            return 1;
+
+        var targetBatch = Math.Max(1, _parallelTargetBatchPerWorker);
+        var byWork = Math.Max(1, (workItems + targetBatch - 1) / targetBatch);
+        return Math.Clamp(byWork, 1, maxDegree);
+    }
+
+    private void WaitTask(WaitHandle? task, string histogramLabel)
+    {
+        if (task == null)
+            return;
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        task.WaitOne();
+        Histogram.WithLabels(histogramLabel).Observe(sw.Elapsed.TotalSeconds);
+    }
+
     // TODO PVS rate limit this?
     private void OnClientRequestFull(ICommonSession session, GameTick tick, NetEntity? missingEntity)
     {
@@ -312,7 +401,7 @@ internal sealed partial class PvsSystem : EntitySystem
 
     private void ForceFullState(PvsSession session)
     {
-        _leaveTask?.WaitOne();
+        WaitTask(_leaveTask, "Wait Leave Task");
         _leaveTask = null;
         session.LastReceivedAck = _gameTiming.CurTick;
         session.RequestedFull = true;
@@ -509,10 +598,10 @@ internal sealed partial class PvsSystem : EntitySystem
         _disconnected.Clear();
     }
 
-    internal void CacheSessionData(ICommonSession[] players)
+    internal void CacheSessionData(IReadOnlyList<ICommonSession> players)
     {
-        Array.Resize(ref _sessions, players.Length);
-        for (var i = 0; i < players.Length; i++)
+        Array.Resize(ref _sessions, players.Count);
+        for (var i = 0; i < players.Count; i++)
         {
             _sessions[i] = GetOrNewPvsSession(players[i]);
         }

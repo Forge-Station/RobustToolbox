@@ -22,8 +22,29 @@ internal sealed partial class PvsSystem
         // If this does get run async, then ProcessDisconnections() has to ensure that the job has finished before modifying
         // the sessions array
 
-        using var _ = Histogram.WithLabels("Send States").NewTimer();
-        var opts = new ParallelOptions {MaxDegreeOfParallelism = _parallelMgr.ParallelProcessCount};
+        var parallelism = GetSendParallelism(_sessions.Length);
+
+        if (parallelism <= 1)
+        {
+            using var _ = Histogram.WithLabels("Send States Sequential").NewTimer();
+            var resource = _threadResourcesPool.Get();
+            try
+            {
+                foreach (var session in _sessions)
+                {
+                    SendSessionState(session, resource.CompressionContext);
+                }
+            }
+            finally
+            {
+                _threadResourcesPool.Return(resource);
+            }
+
+            return;
+        }
+
+        using var __ = Histogram.WithLabels("Send States Parallel").NewTimer();
+        var opts = new ParallelOptions { MaxDegreeOfParallelism = parallelism };
         Parallel.ForEach(_sessions, opts, _threadResourcesPool.Get, SendSessionState, _threadResourcesPool.Return);
     }
 

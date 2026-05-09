@@ -1,6 +1,6 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics.Tracing;
-using System.Linq;
 using JetBrains.Annotations;
 using Robust.Server.Player;
 using Robust.Shared.Enums;
@@ -19,6 +19,7 @@ namespace Robust.Server.GameStates
     public sealed class ServerGameStateManager : IServerGameStateManager, IPostInjectInit
     {
         private PvsSystem _pvs = default!;
+        private readonly List<ICommonSession> _activeSessions = new();
 
         [Dependency] private readonly EntityManager _entityManager = default!;
         [Dependency] private readonly IServerNetManager _networkManager = default!;
@@ -64,8 +65,15 @@ namespace Robust.Server.GameStates
         /// <inheritdoc />
         public void SendGameStateUpdate()
         {
-            var players = _playerManager.Sessions.Where(o => o.Status == SessionStatus.InGame).ToArray();
-            _pvs.SendGameStates(players);
+            _activeSessions.Clear();
+
+            foreach (var session in _playerManager.Sessions)
+            {
+                if (session.Status == SessionStatus.InGame)
+                    _activeSessions.Add(session);
+            }
+
+            _pvs.SendGameStates(_activeSessions);
         }
 
         [EventSource(Name = "Robust.Pvs")]

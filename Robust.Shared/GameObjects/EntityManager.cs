@@ -6,6 +6,7 @@ using System.Linq;
 using System.Runtime.CompilerServices;
 using Prometheus;
 using Robust.Shared.Console;
+using Robust.Shared.Configuration;
 using Robust.Shared.Containers;
 using Robust.Shared.GameStates;
 using Robust.Shared.Log;
@@ -42,6 +43,7 @@ namespace Robust.Shared.GameObjects
         [IoC.Dependency] private readonly ISerializationManager _serManager = default!;
         [IoC.Dependency] private readonly ProfManager _prof = default!;
         [IoC.Dependency] private readonly INetManager _netMan = default!;
+        [IoC.Dependency] private readonly IConfigurationManager _configurationManager = default!;
         [IoC.Dependency] private readonly IReflectionManager _reflection = default!;
         [IoC.Dependency] private readonly EntityConsoleHost _entityConsoleHost = default!;
 
@@ -118,6 +120,7 @@ namespace Robust.Shared.GameObjects
 
         private ISawmill _sawmill = default!;
         internal ISawmill ResolveSawmill = default!;
+        private int _queuedDeletionTickBudget;
 
         public bool Started { get; protected set; }
 
@@ -149,6 +152,7 @@ namespace Robust.Shared.GameObjects
             _xformName = _xformReg.Name;
             _sawmill = LogManager.GetSawmill("entity");
             ResolveSawmill = LogManager.GetSawmill("resolve");
+            _configurationManager.OnValueChanged(CVars.EntQueuedDeletionTickBudget, v => _queuedDeletionTickBudget = Math.Max(0, v), true);
 
 #if DEBUG
             _mainThreadId = Environment.CurrentManagedThreadId;
@@ -300,12 +304,16 @@ namespace Robust.Shared.GameObjects
 
         internal virtual void ProcessQueueudDeletions()
         {
+            var budget = _queuedDeletionTickBudget;
+            var processed = 0;
             while (QueuedDeletions.TryDequeue(out var uid))
             {
+                QueuedDeletionsSet.Remove(uid);
                 DeleteEntity(uid);
-            }
 
-            QueuedDeletionsSet.Clear();
+                if (budget > 0 && ++processed >= budget)
+                    break;
+            }
         }
 
         public virtual void FrameUpdate(float frameTime)
