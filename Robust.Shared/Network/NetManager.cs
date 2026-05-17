@@ -139,11 +139,6 @@ namespace Robust.Shared.Network
         private bool _logPacketIssues = false;
 
         /// <summary>
-        ///     Whether we bother to log problematic packets. Set by <see cref="CVars.NetLogging"/>.
-        /// </summary>
-        private bool _logPacketIssues = false;
-
-        /// <summary>
         ///     Holds lookup table for NetMessage.Id -> NetMessage.Type
         /// </summary>
         private readonly Dictionary<string, MessageData> _messages = new();
