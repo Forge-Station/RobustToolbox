@@ -17,6 +17,7 @@ class License(Validator):
         "CC-BY-NC-ND-4.0",
         "CC0-1.0",
         "MIT",
+        "All rights reserved",
         "Custom" # implies that the license is described in the copyright field.
         ]
 
