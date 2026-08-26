@@ -9,7 +9,10 @@ namespace Robust.Shared.Network;
 
 internal sealed class NetEncryption
 {
+
     private const int ReplayWindowSize = 1024; // Forge-Change - управляется CVar net.encryption_dos_protection
+    public const int EncryptionOverhead = sizeof(ulong) + CryptoAeadXChaCha20Poly1305Ietf.AddBytes;
+
 
     // Use a counter for nonces. The counter is 64-bit, I will be impressed if you ever manage to run it out.
     // 64-bit counter (incl over the wire) is fine, don't need the whole 192-bit.
@@ -40,7 +43,7 @@ internal sealed class NetEncryption
         var nonce = Interlocked.Add(ref _nonce, 2);
 
         var lengthBytes = message.LengthBytes;
-        var encryptedSize = CryptoAeadXChaCha20Poly1305Ietf.AddBytes + lengthBytes + sizeof(ulong);
+        var encryptedSize = lengthBytes + EncryptionOverhead;
 
         var data = message.Data.AsSpan(0, lengthBytes);
 
