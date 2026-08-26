@@ -376,6 +376,13 @@ namespace Robust.Shared
             CVarDef.Create("net.encrypt", true, CVar.CLIENTONLY);
 
         /// <summary>
+        /// Whether nonce replay-window checks are enabled for encrypted packets.
+        /// Disable only for diagnostics or compatibility testing.
+        /// </summary>
+        public static readonly CVarDef<bool> NetEncryptionDosProtection =
+            CVarDef.Create("net.encryption_dos_protection", false);
+
+        /// <summary>
         /// If true, use UPnP to automatically forward ports on startup if possible.
         /// </summary>
         public static readonly CVarDef<bool> NetUPnP =
@@ -386,6 +393,38 @@ namespace Robust.Shared
         /// </summary>
         public static readonly CVarDef<string> NetLidgrenAppIdentifier =
             CVarDef.Create("net.lidgren_app_identifier", "RobustToolbox");
+
+        /// <summary>
+        /// Minimum delay in seconds between detailed decrypt failure log entries for the same IP/subnet.
+        /// Set to 0 or below to disable log sampling.
+        /// </summary>
+        public static readonly CVarDef<int> NetDecryptFailLogIntervalSeconds = // Forge-Change
+            CVarDef.Create("net.dos_fail_log_interval", 30, CVar.SERVERONLY); // Forge-Change
+
+        /// <summary>
+        /// Whether to disconnect clients that exceed the decryption failure threshold.
+        /// </summary>
+        public static readonly CVarDef<bool> NetDecryptFailKick =
+            CVarDef.Create("net.dos_fail_kick", true, CVar.SERVERONLY);
+
+        /// <summary>
+        /// Number of decryption failures from a single IP (or /64 subnet for IPv6) before logging a ban warning and optionally disconnecting.
+        /// </summary>
+        public static readonly CVarDef<int> NetDecryptFailBanThreshold =
+            CVarDef.Create("net.dos_fail_ban_threshold", 10, CVar.SERVERONLY);
+
+        /// <summary>
+        /// How often (in minutes) to clean up stale decryption failure records.
+        /// Records are only removed if they have not been seen for this many minutes.
+        /// </summary>
+        public static readonly CVarDef<int> NetDecryptFailCleanupInterval =
+            CVarDef.Create("net.dos_fail_cleanup_interval", 10, CVar.SERVERONLY);
+
+        /// <summary>
+        /// Maximum number of IPs tracked for decryption failures. Prevents memory exhaustion from botnet attacks.
+        /// </summary>
+        public static readonly CVarDef<int> NetDecryptFailMaxTracked =
+            CVarDef.Create("net.dos_fail_max_tracked", 10000, CVar.SERVERONLY);
 
         /// <summary>
         /// Add random fake network loss to all outgoing UDP network packets, as a ratio of how many packets to drop.

@@ -125,6 +125,7 @@ namespace Robust.Shared.Network
             CancellationToken cancel)
         {
             var encrypt = _config.GetCVar(CVars.NetEncrypt);
+            var encryptionDosProtection = _config.GetCVar(CVars.NetEncryptionDosProtection);
             var authToken = _authManager.Token;
             var pubKey = _authManager.PubKey;
             var authServer = _authManager.Server;
@@ -161,7 +162,7 @@ namespace Robust.Shared.Network
                 RandomNumberGenerator.Fill(sharedSecret);
 
                 if (encrypt)
-                    encryption = new NetEncryption(sharedSecret, isServer: false);
+                    encryption = new NetEncryption(sharedSecret, isServer: false, dosProtectionEnabled: encryptionDosProtection);
 
                 byte[] keyBytes;
                 if (hasPubKey)
@@ -222,7 +223,7 @@ namespace Robust.Shared.Network
                 response = await AwaitData(connection, cancel);
 
                 // Attempt to decrypt the message, only logging if we fail to decrypt and we actually have encryption.
-                if ((!encryption?.TryDecrypt(response)) ?? false)
+                if (encryption != null && !encryption.TryDecrypt(response, encryptionDosProtection, out _)) // Forge-Change
                 {
                     const string msg = "Failed to decrypt login success.";
                     connection.Disconnect(msg);
