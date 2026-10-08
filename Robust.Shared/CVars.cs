@@ -408,10 +408,24 @@ namespace Robust.Shared
             CVarDef.Create("net.dos_fail_kick", true, CVar.SERVERONLY);
 
         /// <summary>
-        /// Number of decryption failures from a single IP (or /64 subnet for IPv6) before logging a ban warning and optionally disconnecting.
+        /// Number of decryption failures from a single IP (or /64 subnet for IPv6) <b>within
+        /// <see cref="NetDecryptFailWindow"/></b> before logging a ban warning and optionally disconnecting.
         /// </summary>
+        /// <remarks>
+        /// Forge-Change: this is a rate, not a lifetime total. Failures older than the window stop counting,
+        /// so a client on a lossy link that merely duplicates or reorders the occasional UDP packet recovers
+        /// on its own instead of staying permanently over the threshold.
+        /// </remarks>
         public static readonly CVarDef<int> NetDecryptFailBanThreshold =
             CVarDef.Create("net.dos_fail_ban_threshold", 10, CVar.SERVERONLY);
+
+        /// <summary>
+        /// Length in seconds of the sliding window over which <see cref="NetDecryptFailBanThreshold"/> is measured.
+        /// Larger values also catch a slow trickle, smaller values react only to concentrated bursts.
+        /// Values below one second are clamped to one second.
+        /// </summary>
+        public static readonly CVarDef<int> NetDecryptFailWindow = // Forge-Change
+            CVarDef.Create("net.dos_fail_window", 60, CVar.SERVERONLY); // Forge-Change
 
         /// <summary>
         /// How often (in minutes) to clean up stale decryption failure records.

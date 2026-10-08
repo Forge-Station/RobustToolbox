@@ -165,7 +165,7 @@ namespace Robust.Shared.Network
         private ISawmill _loggerPacket = default!;
         private ISawmill _authLogger = default!;
 
-        private readonly ConcurrentDictionary<IPAddress, (int TotalCount, DateTime LastSeen)> _decryptFailCounts = new();
+        private readonly ConcurrentDictionary<IPAddress, DecryptFailRecord> _decryptFailCounts = new(); // Forge-Change
         private readonly ConcurrentDictionary<IPAddress, (DateTime NextLogAt, int SuppressedCount, DateTime LastSeen)> _decryptFailLogState = new(); // Forge-Change
         private DateTime _lastDecryptFailCleanup = DateTime.UtcNow;
 
@@ -658,13 +658,71 @@ namespace Robust.Shared.Network
             var intervalMinutes = _config.GetCVar(CVars.NetDecryptFailCleanupInterval);
             if ((now - _lastDecryptFailCleanup).TotalMinutes < intervalMinutes) return;
             _lastDecryptFailCleanup = now;
-            foreach (var (ip, (_, lastSeen)) in _decryptFailCounts)
-            { if ((now - lastSeen).TotalMinutes >= intervalMinutes) _decryptFailCounts.TryRemove(ip, out _); }
+            foreach (var (ip, record) in _decryptFailCounts) // Forge-Change
+            { if ((now - record.LastSeen).TotalMinutes >= intervalMinutes) _decryptFailCounts.TryRemove(ip, out _); }
             foreach (var (ip, (_, _, lastSeen)) in _decryptFailLogState) // Forge-Change
             { if ((now - lastSeen).TotalMinutes >= intervalMinutes) _decryptFailLogState.TryRemove(ip, out _); } // Forge-Change
         }
 
         // Forge-Change-start
+        /// <summary>
+        /// Decryption-failure bookkeeping for one IP, as a two-bucket sliding window.
+        /// </summary>
+        /// <remarks>
+        /// A plain cumulative counter never decayed, so a client that tripped the threshold once stayed over
+        /// it for as long as it kept reconnecting - every later failure re-logged and re-kicked it. Here the
+        /// previous bucket is weighted by how far we are into the current one, which approximates a true
+        /// sliding window in O(1) memory and lets an IP fall back under the threshold on its own.
+        /// </remarks>
+        private readonly record struct DecryptFailRecord(
+            DateTime WindowStart,
+            int PreviousCount,
+            int CurrentCount,
+            DateTime LastSeen);
+
+        /// <summary>
+        /// Records one decryption failure for <paramref name="remoteIp"/> and returns the resulting failure
+        /// count over the trailing window.
+        /// </summary>
+        private double RegisterDecryptFailure(IPAddress remoteIp, DateTime now)
+        {
+            var windowSeconds = Math.Max(1, _config.GetCVar(CVars.NetDecryptFailWindow));
+            var window = TimeSpan.FromSeconds(windowSeconds);
+
+            var record = _decryptFailCounts.AddOrUpdate(
+                remoteIp,
+                static (_, arg) => new DecryptFailRecord(arg.Now, 0, 1, arg.Now),
+                static (_, old, arg) => AdvanceDecryptFailWindow(old, arg.Now, arg.Window),
+                (Now: now, Window: window));
+
+            // AdvanceDecryptFailWindow guarantees WindowStart <= now < WindowStart + window, so the elapsed
+            // fraction below is always in [0, 1).
+            var elapsed = (now - record.WindowStart).TotalSeconds / window.TotalSeconds;
+            return record.PreviousCount * (1.0 - Math.Clamp(elapsed, 0.0, 1.0)) + record.CurrentCount;
+        }
+
+        /// <summary>
+        /// Slides <paramref name="old"/> forward to contain <paramref name="now"/> and counts one more failure.
+        /// </summary>
+        private static DecryptFailRecord AdvanceDecryptFailWindow(DecryptFailRecord old, DateTime now, TimeSpan window)
+        {
+            var elapsed = now - old.WindowStart;
+
+            // Clock went backwards (NTP step); treat it as a fresh window rather than trusting stale buckets.
+            if (elapsed < TimeSpan.Zero)
+                return new DecryptFailRecord(now, 0, 1, now);
+
+            // Idle for two or more windows: everything older has fully aged out.
+            if (elapsed >= window + window)
+                return new DecryptFailRecord(now, 0, 1, now);
+
+            // Crossed exactly one boundary: the current bucket becomes the previous one.
+            if (elapsed >= window)
+                return new DecryptFailRecord(old.WindowStart + window, old.CurrentCount, 1, now);
+
+            return old with { CurrentCount = old.CurrentCount + 1, LastSeen = now };
+        }
+
         private static string GetDecryptFailureReason(NetDecryptionFailure failure)
         {
             return failure switch
@@ -1214,20 +1272,18 @@ namespace Robust.Shared.Network
                         return true;
                     }
 
-                    var (failCount, _) = _decryptFailCounts.AddOrUpdate(
-                        remoteIp,
-                        _ => (1, now),
-                        (_, old) => (old.TotalCount + 1, now));
+                    var failCount = RegisterDecryptFailure(remoteIp, now); // Forge-Change
                     if (_logPacketIssues && ShouldLogDecryptFailure(remoteIp, out var trackedSuppressedCount))
                     {
                         var suppressed = trackedSuppressedCount > 0 ? $" ({trackedSuppressedCount} similar failures suppressed)" : string.Empty;
-                        _logger.Debug($"{remoteEndPoint}: Rejected encrypted packet ({failureReason}); failCount={failCount}{suppressed}.");
+                        _logger.Debug($"{remoteEndPoint}: Rejected encrypted packet ({failureReason}); failCount={failCount:0.#}{suppressed}.");
                     }
 
                     var banThreshold = _config.GetCVar(CVars.NetDecryptFailBanThreshold);
                     if (failCount >= banThreshold)
                     {
-                        _authLogger.Warning($"[DECRYPTBAN] {remoteIp} reached {failCount} decryption failures ({failureReason}). Consider banning this IP."); // Forge-Change
+                        var windowSeconds = Math.Max(1, _config.GetCVar(CVars.NetDecryptFailWindow)); // Forge-Change
+                        _authLogger.Warning($"[DECRYPTBAN] {remoteIp} reached {failCount:0.#} decryption failures ({failureReason}) in the last {windowSeconds}s. Consider banning this IP."); // Forge-Change
                         if (_config.GetCVar(CVars.NetDecryptFailKick))
                             msg.SenderConnection.Disconnect(disconnectReason, false); // Forge-Change
                         return true;
